@@ -28,7 +28,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           llm-provider: gemini
           api-key: ${{ secrets.GEMINI_API_KEY }}
-          model: gemini-2.0-flash
+          model: gemini-1.5-flash
           output-mode: checks
           fail-on-issues: true
           max-files: 50
