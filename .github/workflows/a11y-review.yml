@@ -29,7 +29,7 @@ jobs:
           llm-provider: ollama
           model: kimi-k2.5:cloud
           api-key: ${{ secrets.OLLAMA_API_KEY }}
-          output-mode: checks
+          output-mode: comments
           fail-on-issues: true
           max-files: 50
           batch-size: 10
