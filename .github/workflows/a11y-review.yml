@@ -26,9 +26,9 @@ jobs:
         uses: rtCamp/ax-review@v1.0.3
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          llm-provider: ollama
-          model: qwen3.5:cloud 
-          api-key: ${{ secrets.OLLAMA_API_KEY }}
+          llm-provider: gemini
+          model: gemini-2.5-pro 
+          api-key: ${{ secrets.GEMINI_API_KEY }}
           output-mode: comments
           fail-on-issues: true
           max-files: 50
