@@ -27,7 +27,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           llm-provider: ollama
-          model: qwen3-coder-next:cloud
+          model: qwen3.5:cloud
           api-key: ${{ secrets.OLLAMA_API_KEY }}
           output-mode: comments
           fail-on-issues: true
