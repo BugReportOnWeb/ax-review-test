@@ -29,7 +29,7 @@ jobs:
           llm-provider: ollama
           model: minimax-m2.7:cloud 
           api-key: ${{ secrets.OLLAMA_API_KEY }}
-          output-mode: comments
+          output-mode: checks
           fail-on-issues: true
           max-files: 50
           batch-size: 10
