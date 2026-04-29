@@ -201,7 +201,7 @@ jobs:
             },
           });
 
-          const MODEL = "qwen3.5:cloud; // Change to minimax-m2.7:cloud or glm-5:cloud if preferred
+          const MODEL = "qwen3.5:cloud;
 
           const SYSTEM_PROMPT = fs.readFileSync("system-prompt.txt", "utf-8");
 
