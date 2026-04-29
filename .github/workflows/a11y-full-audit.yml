@@ -13,6 +13,9 @@ on:
         default: "10"
 
 jobs:
+  # ============================================================
+  # JOB 1: Full LLM-based code scan across the entire codebase
+  # ============================================================
   full-code-scan:
     runs-on: ubuntu-latest
     permissions:
@@ -33,6 +36,55 @@ jobs:
           npm init -y
           npm install ollama glob
 
+      - name: Write system prompt file
+        run: |
+          cat << 'PROMPT_EOF' > system-prompt.txt
+          You are a WCAG 2.2 AA accessibility expert auditing source code files.
+
+          Analyze each file for accessibility violations. Unlike a PR review, these are COMPLETE files — check every element.
+
+          ## Severity Classification
+          - CRITICAL: Blocks access entirely (missing alt, keyboard trap, no form label)
+          - SERIOUS: Significant barrier (low contrast, missing focus indicator, generic link text)
+          - MODERATE: Causes confusion (skipped headings, placeholder-only labels)
+          - MINOR: Enhancement beyond WCAG minimum
+
+          ## What to Check Per File
+          - All <img> elements: missing or empty alt text
+          - All <input> elements: associated <label> or aria-label
+          - All <button> elements: accessible name
+          - All <a> elements: descriptive link text
+          - All onClick handlers on non-interactive elements: keyboard support
+          - Heading structure: logical hierarchy (h1 > h2, no skips)
+          - ARIA roles and attributes: correct usage
+          - Focus management: tabIndex misuse
+          - Color contrast: inline styles with explicit color values
+          - Form elements: error identification, required field marking
+
+          ## WCAG Criteria to Cover
+          1.1.1, 1.3.1, 1.4.3, 1.4.11, 2.1.1, 2.1.2, 2.4.3, 2.4.4, 2.4.6, 2.4.7, 2.5.8, 3.3.1, 3.3.2, 4.1.1, 4.1.2
+
+          ## Output Format
+          Return ONLY valid JSON — no markdown, no preamble:
+          {
+            "issues": [
+              {
+                "file": "path/to/file.tsx",
+                "line": 42,
+                "wcag_criterion": "1.1.1",
+                "wcag_level": "A",
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "title": "Image missing alternative text",
+                "description": "The img element has no alt attribute.",
+                "impact": "Screen reader users will not know what the image conveys.",
+                "suggestion": "<img src='chart.png' alt='Bar chart showing Q3 sales' />"
+              }
+            ],
+            "summary": "X issues found across Y files."
+          }
+          PROMPT_EOF
+
       - name: Run full codebase scan
         env:
           OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
@@ -45,6 +97,7 @@ jobs:
           import fs from "fs";
           import path from "path";
 
+          // ── Configuration ────────────────────────────────────────────────
           const API_KEY    = process.env.OLLAMA_API_KEY;
           const MAX_FILES  = parseInt(process.env.MAX_FILES  || "100");
           const BATCH_SIZE = parseInt(process.env.BATCH_SIZE || "10");
@@ -54,16 +107,20 @@ jobs:
             process.exit(1);
           }
 
+          // ── File patterns (mirrors ax-review's hybrid detection) ─────────
+          // Always scan these extensions
           const MARKUP_EXTENSIONS = new Set([
             "html","htm","xhtml","jsx","tsx","vue","svelte","astro",
             "erb","ejs","hbs","php","twig","liquid",
             "css","scss","sass","less","md","mdx"
           ]);
 
+          // Check content of these for embedded markup before including
           const AMBIGUOUS_EXTENSIONS = new Set([
             "js","ts","mjs","cjs","py","rb","java"
           ]);
 
+          // Always skip these patterns
           const SKIP_PATTERNS = [
             /node_modules\//,
             /\.min\.(js|css)$/,
@@ -88,6 +145,7 @@ jobs:
             /backend\//,
           ];
 
+          // Markup content patterns for ambiguous extensions
           const MARKUP_CONTENT_PATTERNS = [
             /<[A-Z][a-zA-Z]*[\s>]/,
             /<[a-z][a-z0-9]*[\s>\/>]/i,
@@ -127,6 +185,7 @@ jobs:
             return false;
           }
 
+          // ── Collect files ─────────────────────────────────────────────────
           console.log("🔍 Collecting files...");
           const allFiles = await glob("**/*", {
             nodir: true,
@@ -137,7 +196,7 @@ jobs:
           const webFiles = allFiles.filter(shouldIncludeFile);
           const filesToScan = MAX_FILES > 0 ? webFiles.slice(0, MAX_FILES) : webFiles;
 
-          console.log(`📁 Found ${webFiles.length} web files. Scanning ${filesToScan.length}.`);
+          console.log("📁 Found " + webFiles.length + " web files. Scanning " + filesToScan.length + ".");
 
           if (filesToScan.length === 0) {
             console.log("✅ No web files found to scan.");
@@ -146,65 +205,25 @@ jobs:
           }
 
           // ── LLM setup (Ollama Cloud) ──────────────────────────────────────
+          const ollama = new Ollama({
             host: "https://ollama.com",
             headers: {
-              Authorization: `Bearer ${API_KEY}`,
+              Authorization: "Bearer " + API_KEY,
             },
           });
 
           const MODEL = "kimi-k2.5:cloud"; // Change to minimax-m2.7:cloud or glm-5:cloud if preferred
 
-          const SYSTEM_PROMPT = `You are a WCAG 2.2 AA accessibility expert auditing source code files.
+          // Prompt is written to disk in the prior step to avoid heredoc/backtick conflicts
+          const SYSTEM_PROMPT = fs.readFileSync("system-prompt.txt", "utf-8");
 
-Analyze each file for accessibility violations. Unlike a PR review, these are COMPLETE files — check every element.
-
-## Severity Classification
-- CRITICAL: Blocks access entirely (missing alt, keyboard trap, no form label)
-- SERIOUS: Significant barrier (low contrast, missing focus indicator, generic link text)
-- MODERATE: Causes confusion (skipped headings, placeholder-only labels)
-- MINOR: Enhancement beyond WCAG minimum
-
-## What to Check Per File
-- All <img> elements: missing or empty alt text
-- All <input> elements: associated <label> or aria-label
-- All <button> elements: accessible name
-- All <a> elements: descriptive link text
-- All onClick handlers on non-interactive elements: keyboard support
-- Heading structure: logical hierarchy (h1 > h2, no skips)
-- ARIA roles and attributes: correct usage
-- Focus management: tabIndex misuse
-- Color contrast: inline styles with explicit color values
-- Form elements: error identification, required field marking
-
-## WCAG Criteria to Cover
-1.1.1, 1.3.1, 1.4.3, 1.4.11, 2.1.1, 2.1.2, 2.4.3, 2.4.4, 2.4.6, 2.4.7, 2.5.8, 3.3.1, 3.3.2, 4.1.1, 4.1.2
-
-## Output Format
-Return ONLY valid JSON — no markdown, no preamble:
-{
-  "issues": [
-    {
-      "file": "path/to/file.tsx",
-      "line": 42,
-      "wcag_criterion": "1.1.1",
-      "wcag_level": "A",
-      "severity": "CRITICAL",
-      "confidence": "high",
-      "title": "Image missing alternative text",
-      "description": "The <img> element has no alt attribute.",
-      "impact": "Screen reader users will not know what the image conveys.",
-      "suggestion": "<img src=\"chart.png\" alt=\"Bar chart showing Q3 sales\" />"
-    }
-  ],
-  "summary": "X issues found across Y files."
-}`;
-
+          // ── Process batches ───────────────────────────────────────────────
           const batches = [];
           for (let i = 0; i < filesToScan.length; i += BATCH_SIZE) {
             batches.push(filesToScan.slice(i, i + BATCH_SIZE));
           }
 
-          console.log(`📦 Processing ${batches.length} batch(es) of up to ${BATCH_SIZE} files each...`);
+          console.log("📦 Processing " + batches.length + " batch(es) of up to " + BATCH_SIZE + " files each...");
 
           const allIssues = [];
           let successfulBatches = 0;
@@ -212,10 +231,10 @@ Return ONLY valid JSON — no markdown, no preamble:
 
           for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
             const batch = batches[batchIndex];
-            console.log(`\n⏳ Batch ${batchIndex + 1}/${batches.length} (${batch.length} files)...`);
+            console.log("\n⏳ Batch " + (batchIndex + 1) + "/" + batches.length + " (" + batch.length + " files)...");
 
             // Build user prompt with full file contents
-            let userPrompt = `Analyze the following ${batch.length} source file(s) for WCAG 2.2 AA accessibility issues.\n\n`;
+            let userPrompt = "Analyze the following " + batch.length + " source file(s) for WCAG 2.2 AA accessibility issues.\n\n";
 
             for (const filepath of batch) {
               try {
@@ -224,9 +243,9 @@ Return ONLY valid JSON — no markdown, no preamble:
                 const truncated = content.length > 50000
                   ? content.slice(0, 50000) + "\n... [truncated at 50000 chars]"
                   : content;
-                userPrompt += `[FILE] ${filepath}\n[CONTENT]\n${truncated}\n[END FILE]\n\n`;
+                userPrompt += "[FILE] " + filepath + "\n[CONTENT]\n" + truncated + "\n[END FILE]\n\n";
               } catch (e) {
-                console.warn(`  ⚠️  Could not read ${filepath}: ${e.message}`);
+                console.warn("  ⚠️  Could not read " + filepath + ": " + e.message);
               }
             }
 
@@ -257,16 +276,16 @@ Return ONLY valid JSON — no markdown, no preamble:
 
                 if (Array.isArray(parsed.issues)) {
                   allIssues.push(...parsed.issues);
-                  console.log(`  ✅ ${parsed.issues.length} issue(s) found`);
+                  console.log("  ✅ " + parsed.issues.length + " issue(s) found");
                   batchSuccess = true;
                   break;
                 }
               } catch (err) {
                 const isRateLimit = err.message?.includes("429") || err.message?.includes("rate");
-                console.warn(`  ⚠️  Attempt ${attempt} failed: ${err.message}`);
+                console.warn("  ⚠️  Attempt " + attempt + " failed: " + err.message);
                 if (isRateLimit && attempt < 3) {
                   const delay = 1000 * Math.pow(2, attempt);
-                  console.log(`  ⏳ Rate limited — waiting ${delay}ms...`);
+                  console.log("  ⏳ Rate limited — waiting " + delay + "ms...");
                   await new Promise(r => setTimeout(r, delay));
                 } else if (attempt === 3) {
                   failedBatches++;
@@ -293,9 +312,9 @@ Return ONLY valid JSON — no markdown, no preamble:
           };
 
           fs.writeFileSync("scan-results.json", JSON.stringify(results, null, 2));
-          console.log(`\n📊 Scan complete: ${allIssues.length} total issue(s) across ${filesToScan.length} file(s).`);
+          console.log("\n📊 Scan complete: " + allIssues.length + " total issue(s) across " + filesToScan.length + " file(s).");
           if (failedBatches > 0) {
-            console.warn(`⚠️  ${failedBatches} batch(es) failed and were skipped.`);
+            console.warn("⚠️  " + failedBatches + " batch(es) failed and were skipped.");
           }
           EOF
 
@@ -322,35 +341,37 @@ Return ONLY valid JSON — no markdown, no preamble:
 
           const ICONS = { CRITICAL: "🔴", SERIOUS: "🟠", MODERATE: "🟡", MINOR: "🔵" };
 
-          let md = `# ♿ Accessibility Full Codebase Scan Report\n\n`;
-          md += `**Scanned at:** ${new Date(scannedAt).toUTCString()}  \n`;
-          md += `**Files scanned:** ${totalFiles}  \n`;
+          let md = "# ♿ Accessibility Full Codebase Scan Report\n\n";
+          md += "**Scanned at:** " + new Date(scannedAt).toUTCString() + "  \n";
+          md += "**Files scanned:** " + totalFiles + "  \n";
           if (failedBatches > 0) {
-            md += `**⚠️ Failed batches:** ${failedBatches} (results may be incomplete)  \n`;
+            md += "**⚠️ Failed batches:** " + failedBatches + " (results may be incomplete)  \n";
           }
-          md += `\n`;
+          md += "\n";
 
-          md += `## Summary\n\n`;
-          md += `| Severity | Count |\n|---|---|\n`;
-          md += `| 🔴 CRITICAL | ${counts.CRITICAL} |\n`;
-          md += `| 🟠 SERIOUS  | ${counts.SERIOUS}  |\n`;
-          md += `| 🟡 MODERATE | ${counts.MODERATE} |\n`;
-          md += `| 🔵 MINOR    | ${counts.MINOR}    |\n`;
-          md += `| **Total**   | **${issues.length}** |\n\n`;
+          md += "## Summary\n\n";
+          md += "| Severity | Count |\n|---|---|\n";
+          md += "| 🔴 CRITICAL | " + counts.CRITICAL + " |\n";
+          md += "| 🟠 SERIOUS  | " + counts.SERIOUS  + " |\n";
+          md += "| 🟡 MODERATE | " + counts.MODERATE + " |\n";
+          md += "| 🔵 MINOR    | " + counts.MINOR    + " |\n";
+          md += "| **Total**   | **" + issues.length + "** |\n\n";
 
           if (issues.length === 0) {
-            md += `✅ No accessibility issues found.\n`;
+            md += "✅ No accessibility issues found.\n";
           } else {
-            md += `## Issues by File\n\n`; for (const [file, fileIssues] of Object.entries(byFile)) { md += `### \`${file}\`\n\n`;
+            md += "## Issues by File\n\n";
+            for (const [file, fileIssues] of Object.entries(byFile)) {
+              md += "### `" + file + "`\n\n";
               for (const issue of fileIssues) {
                 const icon = ICONS[issue.severity] || "⚪";
-                const line = issue.line ? ` (line ${issue.line})` : "";
-                md += `#### ${icon} ${issue.severity}: ${issue.title}${line}\n\n`;
-                md += `- **WCAG:** ${issue.wcag_criterion} (Level ${issue.wcag_level})\n`;
-                md += `- **Confidence:** ${issue.confidence}\n`;
-                md += `- **Description:** ${issue.description}\n`;
-                md += `- **User Impact:** ${issue.impact}\n`;
-                md += `- **Suggested Fix:**\n\`\`\`\n${issue.suggestion}\n\`\`\`\n\n`;
+                const line = issue.line ? " (line " + issue.line + ")" : "";
+                md += "#### " + icon + " " + issue.severity + ": " + issue.title + line + "\n\n";
+                md += "- **WCAG:** " + issue.wcag_criterion + " (Level " + issue.wcag_level + ")\n";
+                md += "- **Confidence:** " + issue.confidence + "\n";
+                md += "- **Description:** " + issue.description + "\n";
+                md += "- **User Impact:** " + issue.impact + "\n";
+                md += "- **Suggested Fix:**\n```\n" + issue.suggestion + "\n```\n\n";
               }
             }
           }
@@ -387,7 +408,7 @@ Return ONLY valid JSON — no markdown, no preamble:
               ? report.slice(0, MAX_BODY) + "\n\n---\n⚠️ Report truncated. Download the full artifact for complete results."
               : report;
 
-            const title = `[A11y Audit] Full Codebase Scan — ${data.issues.length} issue(s) found (${new Date().toISOString().split("T")[0]})`;
+            const title = "[A11y Audit] Full Codebase Scan — " + data.issues.length + " issue(s) found (" + new Date().toISOString().split("T")[0] + ")";
 
             const labels = [];
             if (counts.CRITICAL > 0) labels.push("accessibility:critical");
@@ -414,7 +435,7 @@ Return ONLY valid JSON — no markdown, no preamble:
               labels,
             });
 
-            console.log(`✅ Issue created: ${issue.html_url}`);
+            console.log("✅ Issue created: " + issue.html_url);
 
   # ============================================================
   # JOB 2: URL Audit (Axe, Lighthouse, Pa11y) — runs in parallel
@@ -455,21 +476,21 @@ Return ONLY valid JSON — no markdown, no preamble:
               const url = rawUrl.trim();
               if (!url) continue;
 
-              console.log(`\n🔍 Axe: Testing ${url}`);
+              console.log("\n🔍 Axe: Testing " + url);
               const page = await context.newPage();
               await page.goto(url, { waitUntil: 'networkidle' });
 
               const results = await new AxeBuilder({ page }).analyze();
 
               if (results.violations.length > 0) {
-                console.log(`❌ ${results.violations.length} violation(s) found`);
+                console.log("❌ " + results.violations.length + " violation(s) found");
                 results.violations.forEach(v => {
-                  console.log(`\n[${v.id}] ${v.help}`);
-                  console.log(`Impact: ${v.impact}`);
-                  console.log(`Help: ${v.helpUrl}`);
+                  console.log("\n[" + v.id + "] " + v.help);
+                  console.log("Impact: " + v.impact);
+                  console.log("Help: " + v.helpUrl);
                   v.nodes.forEach(node => {
-                    console.log(`  Target: ${node.target.join(', ')}`);
-                    console.log(`  HTML: ${node.html}`);
+                    console.log("  Target: " + node.target.join(', '));
+                    console.log("  HTML: " + node.html);
                   });
                 });
               } else {
