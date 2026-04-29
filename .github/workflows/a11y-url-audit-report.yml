@@ -111,42 +111,67 @@ jobs:
         run: |
           urls="${{ github.event.inputs.urls }}"
           IFS=',' read -ra URL_ARRAY <<< "$urls"
-          all_results="[]"
+          mkdir -p pa11y-raw
+          idx=0
 
           for url in "${URL_ARRAY[@]}"; do
             url_trimmed=$(echo "$url" | xargs)
             echo "🔍 Pa11y: $url_trimmed"
 
-            # pa11y exits non-zero when it finds issues — suppress with || true
-            result=$(pa11y "$url_trimmed" \
+            # Write pa11y JSON output directly to a file — avoids shell variable
+            # corruption when output contains special characters or is empty.
+            pa11y "$url_trimmed" \
               --standard WCAG2AA \
               --reporter json \
-              --config ./pa11y.json 2>/dev/null || echo '[]')
+              --config ./pa11y.json \
+              > "pa11y-raw/${idx}.json" 2>/dev/null || true
 
-            # Wrap in { pageUrl, issues } to match our schema
-            entry=$(node -e "
-              const issues = JSON.parse(process.env.RESULT || '[]');
-              console.log(JSON.stringify({ pageUrl: process.env.URL, issues }));
-            " URL="$url_trimmed" RESULT="$result")
+            # Validate / normalise: ensure the file contains a JSON array
+            node -e "
+              const fs = require('fs');
+              const file = process.argv[1];
+              let issues = [];
+              try {
+                const raw = fs.readFileSync(file, 'utf8').trim();
+                if (raw) issues = JSON.parse(raw);
+                if (!Array.isArray(issues)) issues = [];
+              } catch(e) {}
+              fs.writeFileSync(file, JSON.stringify(issues));
+            " "pa11y-raw/${idx}.json"
 
-            # Append to running array
-            all_results=$(node -e "
-              const arr = JSON.parse(process.env.ARR);
-              arr.push(JSON.parse(process.env.ENTRY));
-              console.log(JSON.stringify(arr));
-            " ARR="$all_results" ENTRY="$entry")
-
-            issue_count=$(echo "$result" | node -e "
-              let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{
-                try{console.log(JSON.parse(d).length)}catch{console.log(0)}
-              });
-            ")
+            issue_count=$(node -e "
+              const fs = require('fs');
+              try { console.log(JSON.parse(fs.readFileSync(process.argv[1], 'utf8')).length); }
+              catch { console.log(0); }
+            " "pa11y-raw/${idx}.json")
             echo "$issue_count issue(s) found"
             echo "----------------------------------"
+
+            echo "$url_trimmed" > "pa11y-raw/${idx}.url"
+            idx=$((idx + 1))
           done
 
-          echo "$all_results" > pa11y-results.json
-          echo "📄 pa11y-results.json written"
+          # Merge all per-URL result files into pa11y-results.json
+          node -e "
+            const fs = require('fs');
+            const dir = 'pa11y-raw';
+            const results = [];
+            const jsonFiles = fs.readdirSync(dir)
+              .filter(f => f.endsWith('.json'))
+              .sort((a, b) => parseInt(a) - parseInt(b));
+            for (const f of jsonFiles) {
+              const idx = f.replace('.json', '');
+              const urlFile = dir + '/' + idx + '.url';
+              const pageUrl = fs.existsSync(urlFile)
+                ? fs.readFileSync(urlFile, 'utf8').trim()
+                : 'unknown';
+              let issues = [];
+              try { issues = JSON.parse(fs.readFileSync(dir + '/' + f, 'utf8')); } catch {}
+              results.push({ pageUrl, issues });
+            }
+            fs.writeFileSync('pa11y-results.json', JSON.stringify(results, null, 2));
+            console.log('📄 pa11y-results.json written (' + results.length + ' URL(s))');
+          "
 
       # ── GENERATE CONSOLIDATED REPORT ─────────────────────────────────────
       - name: Generate consolidated Markdown report
