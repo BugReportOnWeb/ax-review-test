@@ -184,19 +184,16 @@ jobs:
           function mdEscape(s){return String(s||'').replace(/</g,'\\<').replace(/>/g,'\\>').replace(/\|/g,'\\|');}
           const findings=new Map();
           const passes=new Map();
-
           function upsert(ruleId,description,impact,helpUrl,source,html,target,url){
             const key=ruleId;
             if(!findings.has(key))findings.set(key,{ruleId,description,impact,helpUrl,sources:new Set(),nodes:[]});
             const f=findings.get(key); f.sources.add(source);
             if(!f.nodes.some(n=>normalizeHtml(n.html)===normalizeHtml(html)))f.nodes.push({html:html||'',target:target||'',url:url||''});
           }
-
           function upsertPass(ruleId,description,helpUrl,source){
             if(!passes.has(ruleId))passes.set(ruleId,{ruleId,description,helpUrl,sources:new Set()});
             passes.get(ruleId).sources.add(source);
           }
-
           for(const r of axeRaw){
             for(const v of(r.violations||[]))for(const n of(v.nodes||[]))
               upsert(v.id,v.help||v.description||'',v.impact||'unknown',v.helpUrl||'','axe',n.html,Array.isArray(n.target)?n.target.join(', '):(n.target||''),r.url);
@@ -227,15 +224,14 @@ jobs:
           L.push(`## Lighthouse Score`);
           L.push(``,agg!==null?`**Overall (average):** ${scoreLine(agg)}`:`_No Lighthouse data found._`,``);
           if(Object.keys(lhScores).length){L.push(`| URL | Score |`,`|-----|-------|`);for(const[u,s]of Object.entries(lhScores))L.push(`| ${u} | ${scoreLine(s)} |`);L.push(``);}
-          L.push(`> [Lighthouse Scoring Documentation](https://developer.chrome.com/docs/lighthouse/accessibility/scoring)`,``,`---`,``);
+          L.push(`> [Chrome Developer Scoring Documentation (Lighthouse)](https://developer.chrome.com/docs/lighthouse/accessibility/scoring)`,``,`---`,``);
           L.push(`## Summary`,``,`| Metric | Count |`,`|--------|-------|`,`| 🔴 Errors (critical + serious) | **${totalErrors}** |`,`| 🟡 Warnings (moderate + minor) | **${totalWarnings}** |`,`| ✅ Passes (axe-core, deduplicated) | **${totalPasses}** |`,`| 🔵 Unique violations (deduplicated) | **${allFindings.length}** |`,``,`---`,``);
           L.push(`## Findings`);
           if(allFindings.length===0){L.push(``,`✅ **No violations found across all tools.**`,``);}
           else{
-            L.push(``,`_Sorted by impact severity. Deduplicated across Axe and Pa11y._`,``);
             for(const f of allFindings){
               L.push(`<details>`);
-              L.push(`<summary><strong>${EMOJI[f.impact]||'⚫'} <code>${f.ruleId}</code></strong> — ${mdEscape(f.description)} <em>(${f.impact})</em></summary>`,``);
+              L.push(`<summary><strong>${EMOJI[f.impact]||'⚫'} <code>${f.ruleId}</code></strong> <em>(${f.impact})</em></summary>`,``);
               L.push(`| Field | Value |`,`|-------|-------|`,`| **Impact** | ${f.impact} |`,`| **Source(s)** | ${[...f.sources].join(', ')} |`,`| **Description** | ${mdEscape(f.description)} |`);
               if(f.helpUrl)L.push(`| **Reference** | [More info](${f.helpUrl}) |`);
               L.push(``,`**Affected elements** (${f.nodes.length}):`);
