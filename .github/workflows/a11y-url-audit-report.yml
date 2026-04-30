@@ -184,7 +184,7 @@ jobs:
           function mdEscape(s){return String(s||'').replace(/</g,'\\<').replace(/>/g,'\\>').replace(/\|/g,'\\|');}
           const findings=new Map();
           function upsert(ruleId,description,impact,helpUrl,source,html,target,url){
-            const key=`${ruleId}::${url}`;
+            const key=ruleId;
             if(!findings.has(key))findings.set(key,{ruleId,description,impact,helpUrl,sources:new Set(),nodes:[]});
             const f=findings.get(key); f.sources.add(source);
             if(!f.nodes.some(n=>normalizeHtml(n.html)===normalizeHtml(html)))f.nodes.push({html:html||'',target:target||'',url:url||''});
